@@ -141,7 +141,7 @@ public class TusClient {
      * prefix, and can cause unexpected behavior.
      *
      * @see #getHeaders()
-     * @see #prepareConnection(HttpURLConnection)
+     * @see #prepareConnection(String, HttpURLConnection)
      *
      * @param headers The map of HTTP headers
      */
@@ -154,7 +154,7 @@ public class TusClient {
      * {@link #setHeaders(Map)}.
      *
      * @see #setHeaders(Map)
-     * @see #prepareConnection(HttpURLConnection)
+     * @see #prepareConnection(String, HttpURLConnection)
      *
      * @return The map of configured HTTP headers
      */
