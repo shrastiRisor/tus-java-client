@@ -4,9 +4,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * This class is used for creating or resuming uploads.
@@ -20,8 +24,9 @@ public class TusClient {
 
     private URL uploadCreationURL;
     private boolean resumingEnabled;
+    private boolean supportCookies;
     private boolean removeFingerprintOnSuccessEnabled;
-    private TusURLStore urlStore;
+    private TusURLDetailStore urlStore;
     private Map<String, String> headers;
     private int connectTimeout = 5000;
 
@@ -58,7 +63,7 @@ public class TusClient {
      *
      * @param urlStore Storage used to save and retrieve upload URLs by its fingerprint.
      */
-    public void enableResuming(@NotNull TusURLStore urlStore) {
+    public void enableResuming(@NotNull TusURLDetailStore urlStore) {
         resumingEnabled = true;
         this.urlStore = urlStore;
     }
@@ -66,7 +71,7 @@ public class TusClient {
     /**
      * Disable resuming started uploads.
      *
-     * @see #enableResuming(TusURLStore)
+     * @see #enableResuming(TusURLDetailStore)
      */
     public void disableResuming() {
         resumingEnabled = false;
@@ -76,13 +81,27 @@ public class TusClient {
     /**
      * Get the current status if resuming.
      *
-     * @see #enableResuming(TusURLStore)
+     * @see #enableResuming(TusURLDetailStore)
      * @see #disableResuming()
      *
-     * @return True if resuming has been enabled using {@link #enableResuming(TusURLStore)}
+     * @return True if resuming has been enabled using {@link #enableResuming(TusURLDetailStore)}
      */
     public boolean resumingEnabled() {
         return resumingEnabled;
+    }
+
+    /**
+     * Enable support for cookies for {@link TusUpload}
+     */
+    public void enableCookiesSupport() {
+        supportCookies = true;
+    }
+
+    /**
+     * Disable support for cookies for {@link TusUpload}
+     */
+    public void disableCookiesSupport() {
+        supportCookies = false;
     }
 
     /**
@@ -109,7 +128,7 @@ public class TusClient {
      * @see #enableRemoveFingerprintOnSuccess()
      * @see #disableRemoveFingerprintOnSuccess()
      *
-     * @return True if resuming has been enabled using {@link #enableResuming(TusURLStore)}
+     * @return True if resuming has been enabled using {@link #enableResuming(TusURLDetailStore)}
      */
     public boolean removeFingerprintOnSuccessEnabled() {
         return removeFingerprintOnSuccessEnabled;
@@ -176,7 +195,7 @@ public class TusClient {
     public TusUploader createUpload(@NotNull TusUpload upload) throws ProtocolException, IOException {
         HttpURLConnection connection = (HttpURLConnection) uploadCreationURL.openConnection();
         connection.setRequestMethod("POST");
-        prepareConnection(connection);
+        prepareConnection(upload.getFingerprint(), connection);
 
         String encodedMetadata = upload.getEncodedMetadata();
         if (encodedMetadata.length() > 0) {
@@ -201,27 +220,24 @@ public class TusClient {
         // not the upload creation URL. In most cases, there is no difference between those two
         // but there may be cases in which the POST request is redirected.
         URL uploadURL = new URL(connection.getURL(), urlStr);
-
-        if (resumingEnabled) {
-            urlStore.set(upload.getFingerprint(), uploadURL);
-        }
+        storeUrlDetails(upload.getFingerprint(), uploadURL, connection);
 
         return new TusUploader(this, upload, uploadURL, upload.getTusInputStream(), 0);
     }
 
     /**
      * Try to resume an already started upload. Before call this function, resuming must be
-     * enabled using {@link #enableResuming(TusURLStore)}. This method will look up the URL for this
-     * upload in the {@link TusURLStore} using the upload's fingerprint (see
+     * enabled using {@link #enableResuming(TusURLDetailStore)}. This method will look up the URL for this
+     * upload in the {@link TusURLDetailStore} using the upload's fingerprint (see
      * {@link TusUpload#getFingerprint()}). After a successful lookup a HEAD request will be issued
      * to find the current offset without uploading the file, yet.
      *
      * @param upload The file for which an upload will be resumed
      * @return Use {@link TusUploader} to upload the remaining file's chunks.
      * @throws FingerprintNotFoundException Thrown if no matching fingerprint has been found in
-     * {@link TusURLStore}. Use {@link #createUpload(TusUpload)} to create a new upload.
+     * {@link TusURLDetailStore}. Use {@link #createUpload(TusUpload)} to create a new upload.
      * @throws ResumingNotEnabledException Throw if resuming has not been enabled using {@link
-     * #enableResuming(TusURLStore)}.
+     * #enableResuming(TusURLDetailStore)}.
      * @throws ProtocolException Thrown if the remote server sent an unexpected response, e.g.
      * wrong status codes or missing/invalid headers.
      * @throws IOException Thrown if an exception occurs while issuing the HTTP request.
@@ -232,12 +248,12 @@ public class TusClient {
             throw new ResumingNotEnabledException();
         }
 
-        URL uploadURL = urlStore.get(upload.getFingerprint());
-        if (uploadURL == null) {
+        URLDetail uploadURLDetail = urlStore.get(upload.getFingerprint());
+        if (uploadURLDetail == null || uploadURLDetail.getUrl() == null) {
             throw new FingerprintNotFoundException(upload.getFingerprint());
         }
 
-        return beginOrResumeUploadFromURL(upload, uploadURL);
+        return beginOrResumeUploadFromURL(upload, uploadURLDetail.getUrl());
     }
 
     /**
@@ -261,7 +277,7 @@ public class TusClient {
             ProtocolException, IOException {
         HttpURLConnection connection = (HttpURLConnection) uploadURL.openConnection();
         connection.setRequestMethod("HEAD");
-        prepareConnection(connection);
+        prepareConnection(upload.getFingerprint(), connection);
 
         connection.connect();
 
@@ -276,6 +292,7 @@ public class TusClient {
             throw new ProtocolException("missing upload offset in response for resuming upload", connection);
         }
         long offset = Long.parseLong(offsetStr);
+        storeUrlDetails(upload.getFingerprint(), uploadURL, connection);
 
         return new TusUploader(this, upload, uploadURL, upload.getTusInputStream(), offset);
     }
@@ -314,9 +331,10 @@ public class TusClient {
      * Set headers used for every HTTP request. Currently, this will add the Tus-Resumable header
      * and any custom header which can be configured using {@link #setHeaders(Map)},
      *
+     * @param fingerprint The {@link TusUpload#getFingerprint()} for the upload.
      * @param connection The connection whose headers will be modified.
      */
-    public void prepareConnection(@NotNull HttpURLConnection connection) {
+    public void prepareConnection(@NotNull String fingerprint, @NotNull HttpURLConnection connection) {
         // Only follow redirects, if the POST methods is preserved. If http.strictPostRedirect is
         // disabled, a POST request will be transformed into a GET request which is not wanted by us.
 
@@ -334,6 +352,22 @@ public class TusClient {
                 connection.addRequestProperty(entry.getKey(), entry.getValue());
             }
         }
+        if (supportCookies) {
+            URLDetail urlDetail = urlStore.get(fingerprint);
+            if (urlDetail != null && urlDetail.getCookies() != null && !urlDetail.getCookies().isEmpty()) {
+                connection.addRequestProperty("Cookie", parseCookieHeader(urlDetail.getCookies()));
+            }
+        }
+    }
+
+    public void updateCookies(@NotNull String fingerprint, @NotNull HttpURLConnection connection) {
+        if (resumingEnabled && supportCookies) {
+            List<String> cookiesHeaders = connection.getHeaderFields().get("Set-Cookie");
+            if (cookiesHeaders != null && !cookiesHeaders.isEmpty()) {
+                Set<HttpCookie> cookies = new HashSet<>(parseCookies(cookiesHeaders));
+                urlStore.updateCookies(fingerprint, cookies);
+            }
+        }
     }
 
     /**
@@ -345,6 +379,56 @@ public class TusClient {
     protected void uploadFinished(@NotNull TusUpload upload) {
         if (resumingEnabled && removeFingerprintOnSuccessEnabled) {
             urlStore.remove(upload.getFingerprint());
+        }
+    }
+
+    /**
+     * Stores the {@link URLDetail} for the corresponding upload if {@link #resumingEnabled} is true.
+     *
+     * @param fingerprint of the upload to be stored.
+     * @param uploadURL to be stored in {@link TusURLDetailStore}.
+     * @param connection to persist cookies for subsequent request.
+     */
+    private void storeUrlDetails(@NotNull String fingerprint, @NotNull URL uploadURL, HttpURLConnection connection) {
+        if (resumingEnabled) {
+            Set<HttpCookie> cookies = new HashSet<>();
+            if (supportCookies && connection != null) {
+                List<String> cookiesHeaders = connection.getHeaderFields().get("Set-Cookie");
+                if (cookiesHeaders != null && !cookiesHeaders.isEmpty()) {
+                    cookies.addAll(parseCookies(cookiesHeaders));
+                }
+            }
+            urlStore.set(fingerprint, new URLDetail(uploadURL, cookies));
+        }
+    }
+
+    public static Set<HttpCookie> parseCookies(List<String> cookieHeaders) {
+        Set<HttpCookie> cookies = new HashSet<>();
+        for (String cookieHeader : cookieHeaders) {
+            try {
+                cookies.addAll(HttpCookie.parse(cookieHeader));
+            } catch (Exception ignored) {
+            }
+        }
+        return cookies;
+    }
+
+    public static String parseCookieHeader(Set<HttpCookie> cookies) {
+        StringBuilder sb = new StringBuilder();
+        for (HttpCookie cookie : cookies) {
+            if (!cookie.hasExpired()) {
+                if (sb.length() > 0) {
+                    sb.append("; ");
+                }
+                sb.append(cookie.getName());
+                sb.append('=');
+                sb.append(cookie.getValue());
+            }
+        }
+        if (sb.length() > 0) {
+            return sb.toString();
+        } else {
+            return null;
         }
     }
 }

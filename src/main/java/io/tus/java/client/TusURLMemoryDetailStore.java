@@ -1,8 +1,10 @@
 package io.tus.java.client;
 
+import java.net.HttpCookie;
 import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * This class is used to map an upload's fingerprint with the corresponding upload URL by storing
@@ -12,17 +14,17 @@ import java.util.Map;
  * The values will only be stored as long as the application is running. This store will not
  * keep the values after your application crashes or restarts.
  */
-public class TusURLMemoryStore implements TusURLStore {
-    private Map<String, URL> store = new HashMap<String, URL>();
+public class TusURLMemoryDetailStore implements TusURLDetailStore {
+    private Map<String, URLDetail> store = new HashMap<String, URLDetail>();
 
     /**
      * Stores the upload's fingerprint and url.
      * @param fingerprint An upload's fingerprint.
-     * @param url The corresponding upload URL.
+     * @param urlDetail The corresponding upload URL.
      */
     @Override
-    public void set(String fingerprint, URL url) {
-        store.put(fingerprint, url);
+    public void set(String fingerprint, URLDetail urlDetail) {
+        store.put(fingerprint, urlDetail);
     }
 
     /**
@@ -31,12 +33,26 @@ public class TusURLMemoryStore implements TusURLStore {
      * @return The corresponding upload URL.
      */
     @Override
-    public URL get(String fingerprint) {
+    public URLDetail get(String fingerprint) {
         return store.get(fingerprint);
     }
 
     /**
-     * Removes the corresponding entry to a fingerprint from the {@link TusURLMemoryStore}.
+     * Updates cookies for already stored fingerprint.
+     *
+     * @param fingerprint An upload's fingerprint.
+     * @param cookies The corresponding upload cookies.
+     */
+    @Override
+    public void updateCookies(String fingerprint, Set<HttpCookie> cookies) {
+        URLDetail urlDetail = store.get(fingerprint);
+        if (urlDetail != null) {
+            urlDetail.getCookies().addAll(cookies);
+        }
+    }
+
+    /**
+     * Removes the corresponding entry to a fingerprint from the {@link TusURLMemoryDetailStore}.
      * @param fingerprint An upload's fingerprint.
      */
     @Override

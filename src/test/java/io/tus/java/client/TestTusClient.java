@@ -7,12 +7,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.HttpCookie;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 
 import org.junit.Test;
 import org.mockserver.model.HttpRequest;
@@ -62,7 +61,7 @@ public class TestTusClient extends MockServerProvider {
         TusClient client = new TusClient();
         assertEquals(client.resumingEnabled(), false);
 
-        TusURLStore store = new TusURLMemoryStore();
+        TusURLDetailStore store = new TusURLMemoryDetailStore();
         client.enableResuming(store);
         assertEquals(client.resumingEnabled(), true);
 
@@ -194,7 +193,7 @@ public class TestTusClient extends MockServerProvider {
 
         TusClient client = new TusClient();
         client.setUploadCreationURL(mockServerURL);
-        client.enableResuming(new TestResumeUploadStore());
+        client.enableResuming(new TestResumeUploadDetailStore());
 
         TusUpload upload = new TusUpload();
         upload.setSize(10);
@@ -208,20 +207,23 @@ public class TestTusClient extends MockServerProvider {
     }
 
     /**
-     * Test Implementation for a {@link TusURLStore}.
+     * Test Implementation for a {@link TusURLDetailStore}.
      */
-    private class TestResumeUploadStore implements TusURLStore {
-        public void set(String fingerprint, URL url) {
-            assertTrue("set method must not be called", false);
+    private class TestResumeUploadDetailStore implements TusURLDetailStore {
+        public void set(String fingerprint, URLDetail url) {
         }
 
-        public URL get(String fingerprint) {
+        public URLDetail get(String fingerprint) {
             assertEquals(fingerprint, "test-fingerprint");
 
             try {
-                return new URL(mockServerURL.toString() + "/foo");
+                return new URLDetail(new URL(mockServerURL.toString() + "/foo"));
             } catch (Exception e) { }
             return null;
+        }
+
+        public void updateCookies(String fingerprint, Set<HttpCookie> cookies) {
+            assertTrue("updateCookies method must not be called", false);
         }
 
         public void remove(String fingerprint) {
@@ -284,8 +286,8 @@ public class TestTusClient extends MockServerProvider {
         TusClient client = new TusClient();
         client.setUploadCreationURL(mockServerURL);
 
-        TusURLStore store = new TusURLMemoryStore();
-        store.set("fingerprint", new URL(mockServerURL + "/not_found"));
+        TusURLDetailStore store = new TusURLMemoryDetailStore();
+        store.set("fingerprint", new URLDetail(new URL(mockServerURL + "/not_found")));
         client.enableResuming(store);
 
         TusUpload upload = new TusUpload();
@@ -334,7 +336,7 @@ public class TestTusClient extends MockServerProvider {
     public void testPrepareConnection() throws IOException {
         HttpURLConnection connection = (HttpURLConnection) mockServerURL.openConnection();
         TusClient client = new TusClient();
-        client.prepareConnection(connection);
+        client.prepareConnection("fingerprint", connection);
 
         assertEquals(connection.getRequestProperty("Tus-Resumable"), TusClient.TUS_VERSION);
     }
@@ -357,7 +359,7 @@ public class TestTusClient extends MockServerProvider {
         client.setHeaders(headers);
         assertEquals(headers, client.getHeaders());
 
-        client.prepareConnection(connection);
+        client.prepareConnection("fingerprint", connection);
 
         assertEquals(connection.getRequestProperty("Greeting"), "Hello");
         assertEquals(connection.getRequestProperty("Important"), "yes");
@@ -376,7 +378,7 @@ public class TestTusClient extends MockServerProvider {
         client.setConnectTimeout(3000);
         assertEquals(client.getConnectTimeout(), 3000);
 
-        client.prepareConnection(connection);
+        client.prepareConnection("fingerprint", connection);
 
         assertEquals(connection.getConnectTimeout(), 3000);
     }
@@ -391,12 +393,12 @@ public class TestTusClient extends MockServerProvider {
         TusClient client = new TusClient();
 
         // Should not follow by default
-        client.prepareConnection(connection);
+        client.prepareConnection("fingerprint", connection);
         assertFalse(connection.getInstanceFollowRedirects());
 
         // Only follow if we enable strict redirects
         System.setProperty("http.strictPostRedirect", "true");
-        client.prepareConnection(connection);
+        client.prepareConnection("fingerprint", connection);
         assertTrue(connection.getInstanceFollowRedirects());
 
         // Attempt a real redirect
@@ -429,7 +431,7 @@ public class TestTusClient extends MockServerProvider {
     }
 
     /**
-     * Tests if the fingerprint in the {@link TusURLStore} does not get removed after upload success.
+     * Tests if the fingerprint in the {@link TusURLDetailStore} does not get removed after upload success.
      * @throws IOException
      * @throws ProtocolException
      */
@@ -438,9 +440,9 @@ public class TestTusClient extends MockServerProvider {
 
         TusClient client = new TusClient();
 
-        TusURLStore store = new TusURLMemoryStore();
+        TusURLDetailStore store = new TusURLMemoryDetailStore();
         URL dummyURL = new URL("http://dummy-url/files/dummy");
-        store.set("fingerprint", dummyURL);
+        store.set("fingerprint", new URLDetail(dummyURL));
         client.enableResuming(store);
 
         assertTrue(!client.removeFingerprintOnSuccessEnabled());
@@ -450,12 +452,12 @@ public class TestTusClient extends MockServerProvider {
 
         client.uploadFinished(upload);
 
-        assertTrue(dummyURL.equals(store.get("fingerprint")));
+        assertTrue(dummyURL.equals(store.get("fingerprint").getUrl()));
 
     }
 
     /**
-     * Tests if the fingerprint in the {@link TusURLStore} does get removed after upload success,
+     * Tests if the fingerprint in the {@link TusURLDetailStore} does get removed after upload success,
      * after this feature has been enabled via the {@link TusClient#enableRemoveFingerprintOnSuccess()} - method.
      * @throws IOException
      * @throws ProtocolException
@@ -465,9 +467,9 @@ public class TestTusClient extends MockServerProvider {
 
         TusClient client = new TusClient();
 
-        TusURLStore store = new TusURLMemoryStore();
+        TusURLDetailStore store = new TusURLMemoryDetailStore();
         URL dummyURL = new URL("http://dummy-url/files/dummy");
-        store.set("fingerprint", dummyURL);
+        store.set("fingerprint", new URLDetail(dummyURL));
         client.enableResuming(store);
         client.enableRemoveFingerprintOnSuccess();
 

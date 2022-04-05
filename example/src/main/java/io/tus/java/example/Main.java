@@ -7,7 +7,7 @@ import java.net.URL;
 import io.tus.java.client.ProtocolException;
 import io.tus.java.client.TusClient;
 import io.tus.java.client.TusExecutor;
-import io.tus.java.client.TusURLMemoryStore;
+import io.tus.java.client.TusURLMemoryDetailStore;
 import io.tus.java.client.TusUpload;
 import io.tus.java.client.TusUploader;
 
@@ -35,7 +35,7 @@ public final class Main {
             client.setUploadCreationURL(new URL("https://tusd.tusdemo.net/files/"));
 
             // Enable resumable uploads by storing the upload URL in memory
-            client.enableResuming(new TusURLMemoryStore());
+            client.enableResuming(new TusURLMemoryDetailStore());
 
             // Open a file using which we will then create a TusUpload. If you do not have
             // a File object, you can manually construct a TusUpload using an InputStream.

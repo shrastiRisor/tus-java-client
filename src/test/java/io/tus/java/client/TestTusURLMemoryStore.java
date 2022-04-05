@@ -1,32 +1,36 @@
 package io.tus.java.client;
 
+import java.net.HttpCookie;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.Collections;
+import java.util.HashSet;
 
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 
 /**
- * Test class for {@link TusURLMemoryStore}.
+ * Test class for {@link TusURLMemoryDetailStore}.
  */
 public class TestTusURLMemoryStore {
 
     /**
-     * Tests if setting and deleting of an url in the {@link TusURLMemoryStore} works.
+     * Tests if setting and deleting of an url in the {@link TusURLMemoryDetailStore} works.
      * @throws MalformedURLException
      */
     @Test
     public void test() throws MalformedURLException {
-        TusURLStore store = new TusURLMemoryStore();
+        TusURLDetailStore store = new TusURLMemoryDetailStore();
         URL url = new URL("https://tusd.tusdemo.net/files/hello");
         String fingerprint = "foo";
-        store.set(fingerprint, url);
+        store.set(fingerprint, new URLDetail(url, Collections.<HttpCookie>emptySet()));
 
-        assertEquals(store.get(fingerprint), url);
+        assertEquals(store.get(fingerprint).getUrl(), url);
 
         store.remove(fingerprint);
 
-        assertEquals(store.get(fingerprint), null);
+        assertNull(store.get(fingerprint));
     }
 }

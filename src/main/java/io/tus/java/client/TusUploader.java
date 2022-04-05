@@ -66,7 +66,7 @@ public class TusUploader {
         input.mark(requestPayloadSize);
 
         connection = (HttpURLConnection) uploadURL.openConnection();
-        client.prepareConnection(connection);
+        client.prepareConnection(this.upload.getFingerprint(), connection);
         connection.setRequestProperty("Upload-Offset", Long.toString(offset));
         connection.setRequestProperty("Content-Type", "application/offset+octet-stream");
         connection.setRequestProperty("Expect", "100-continue");
@@ -313,6 +313,7 @@ public class TusUploader {
 
         if (connection != null) {
             int responseCode = connection.getResponseCode();
+            this.client.updateCookies(upload.getFingerprint(), connection);
             connection.disconnect();
 
             if (!(responseCode >= 200 && responseCode < 300)) {
